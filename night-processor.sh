@@ -1,17 +1,43 @@
 #!/bin/bash
 # Night processor for BBB MP4 conversions
-# Runs from 22:00 to 07:00 Yekaterinburg time (17:00-02:00 UTC), processes queue with max 2 parallel jobs
+# Configurable timezone and working hours via environment variables
 
-# Configuration
-MAX_PARALLEL_JOBS=2
-QUEUE_DIR="/var/www/bbb-mp4/queue"
+# Load configuration
+load_config() {
+    local config_file="${BBB_MP4_DIR:-/var/www/bbb-mp4}/config.env"
+    
+    # Load from config file if exists
+    if [ -f "$config_file" ]; then
+        source "$config_file"
+    fi
+    
+    # Set defaults if not configured
+    export BBB_DOMAIN_NAME="${BBB_DOMAIN_NAME:-bbb.example.com}"
+    export COPY_TO_LOCATION="${COPY_TO_LOCATION:-/var/www/bigbluebutton-default/recording}"
+    export TIMEZONE="${TIMEZONE:-Asia/Yekaterinburg}"
+    export WORK_START_HOUR="${WORK_START_HOUR:-22}"
+    export WORK_END_HOUR="${WORK_END_HOUR:-7}"
+    export MAX_PARALLEL_JOBS="${MAX_PARALLEL_JOBS:-2}"
+    export CONVERSION_TIMEOUT="${CONVERSION_TIMEOUT:-7200}"
+    export BBB_MP4_DIR="${BBB_MP4_DIR:-/var/www/bbb-mp4}"
+    export QUEUE_DIR="${QUEUE_DIR:-$BBB_MP4_DIR/queue}"
+    export LOG_DIR="${LOG_DIR:-$BBB_MP4_DIR/logs}"
+    export MP4_OUTPUT_DIR="${MP4_OUTPUT_DIR:-$COPY_TO_LOCATION}"
+    export PRESENTATION_DIR="${PRESENTATION_DIR:-/var/bigbluebutton/published/presentation}"
+    export BACKUP_STOP_DELAY="${BACKUP_STOP_DELAY:-15}"
+    export QUEUE_CHECK_INTERVAL="${QUEUE_CHECK_INTERVAL:-60}"
+    export EMPTY_QUEUE_WAIT="${EMPTY_QUEUE_WAIT:-300}"
+}
+
+# Load configuration
+load_config
+
+# Configuration variables
 PENDING_QUEUE="$QUEUE_DIR/pending.txt"
 PROCESSING_QUEUE="$QUEUE_DIR/processing.txt"
 COMPLETED_LOG="$QUEUE_DIR/completed.txt"
 FAILED_LOG="$QUEUE_DIR/failed.txt"
-LOG_FILE="/var/www/bbb-mp4/logs/night-processor.log"
-MP4_OUTPUT_DIR="/var/www/bigbluebutton-default/recording"
-PRESENTATION_DIR="/var/bigbluebutton/published/presentation"
+LOG_FILE="$LOG_DIR/night-processor.log"
 
 # Ensure directories exist
 mkdir -p "$QUEUE_DIR"
@@ -23,11 +49,17 @@ log_message() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
-# Check if we're in working hours (22:00-07:00 Yekaterinburg time)
-# Server runs on UTC, convert to Asia/Yekaterinburg timezone (UTC+5)
+# Check if we're in working hours (configurable timezone and hours)
 is_working_hours() {
-    local hour=$(TZ='Asia/Yekaterinburg' date +%H)
-    [ $hour -ge 22 ] || [ $hour -lt 7 ]
+    local hour=$(TZ="$TIMEZONE" date +%H)
+    
+    # Handle overnight shifts (e.g., 22:00-07:00)
+    if [ $WORK_START_HOUR -gt $WORK_END_HOUR ]; then
+        [ $hour -ge $WORK_START_HOUR ] || [ $hour -lt $WORK_END_HOUR ]
+    else
+        # Handle same-day shifts (e.g., 09:00-17:00)
+        [ $hour -ge $WORK_START_HOUR ] && [ $hour -lt $WORK_END_HOUR ]
+    fi
 }
 
 # Count active BBB-MP4 conversion containers
@@ -109,7 +141,7 @@ start_conversion() {
     # Monitor completion in background
     {
         local start_time=$(date +%s)
-        local timeout=7200  # 2 hours timeout
+        local timeout=$CONVERSION_TIMEOUT
         
         # Wait for container to start (give it 60 seconds)
         sleep 60
@@ -187,7 +219,7 @@ main() {
                 break
             else
                 log_message "INFO: Queue is empty, waiting..."
-                sleep 300  # Wait 5 minutes before checking again
+                sleep $EMPTY_QUEUE_WAIT
                 continue
             fi
         fi
@@ -215,7 +247,7 @@ main() {
         fi
         
         # Wait before next iteration
-        sleep 60
+        sleep $QUEUE_CHECK_INTERVAL
     done
     
     # Outside working hours - wait for active jobs to complete
@@ -225,7 +257,7 @@ main() {
         local active=$(count_active_conversions)
         local active_containers=$(get_active_conversion_containers | tr '\n' ' ')
         log_message "INFO: Waiting for $active active conversions to complete: $active_containers"
-        sleep 60
+        sleep $QUEUE_CHECK_INTERVAL
     done
     
     log_message "INFO: Night processor finished"

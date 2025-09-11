@@ -1,10 +1,19 @@
 #!/bin/bash
 
-# Load .env variables
-set -a
-source <(cat  /var/www/bbb-mp4/.env | \
-    sed -e '/^#/d;/^\s*$/d' -e "s/'/'\\\''/g" -e "s/=\(.*\)/='\1'/g")
-set +a
+# Load configuration from config.env
+BBB_MP4_DIR="${BBB_MP4_DIR:-/var/www/bbb-mp4}"
+CONFIG_FILE="$BBB_MP4_DIR/config.env"
+
+# Load config.env if exists
+if [ -f "$CONFIG_FILE" ]; then
+    set -a
+    source "$CONFIG_FILE"
+    set +a
+else
+    # Fallback defaults
+    BBB_DOMAIN_NAME="${BBB_DOMAIN_NAME:-bbb.example.com}"
+    COPY_TO_LOCATION="${COPY_TO_LOCATION:-/var/www/bigbluebutton-default/recording}"
+fi
 
 MEETING_ID=$1
 

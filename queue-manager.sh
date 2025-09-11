@@ -1,7 +1,33 @@
 #!/bin/bash
 # Queue management utility for BBB MP4 conversions
 
-QUEUE_DIR="/var/www/bbb-mp4/queue"
+# Load configuration (same as night-processor.sh)
+load_config() {
+    local config_file="${BBB_MP4_DIR:-/var/www/bbb-mp4}/config.env"
+    
+    # Load from config file if exists
+    if [ -f "$config_file" ]; then
+        source "$config_file"
+    fi
+    
+    # Set defaults if not configured
+    export BBB_DOMAIN_NAME="${BBB_DOMAIN_NAME:-bbb.example.com}"
+    export COPY_TO_LOCATION="${COPY_TO_LOCATION:-/var/www/bigbluebutton-default/recording}"
+    export TIMEZONE="${TIMEZONE:-Asia/Yekaterinburg}"
+    export WORK_START_HOUR="${WORK_START_HOUR:-22}"
+    export WORK_END_HOUR="${WORK_END_HOUR:-7}"
+    export MAX_PARALLEL_JOBS="${MAX_PARALLEL_JOBS:-2}"
+    export BBB_MP4_DIR="${BBB_MP4_DIR:-/var/www/bbb-mp4}"
+    export QUEUE_DIR="${QUEUE_DIR:-$BBB_MP4_DIR/queue}"
+    export LOG_DIR="${LOG_DIR:-$BBB_MP4_DIR/logs}"
+    export MP4_OUTPUT_DIR="${MP4_OUTPUT_DIR:-$COPY_TO_LOCATION}"
+    export PRESENTATION_DIR="${PRESENTATION_DIR:-/var/bigbluebutton/published/presentation}"
+}
+
+# Load configuration
+load_config
+
+# Configuration variables
 PENDING_QUEUE="$QUEUE_DIR/pending.txt"
 PROCESSING_QUEUE="$QUEUE_DIR/processing.txt"
 COMPLETED_LOG="$QUEUE_DIR/completed.txt"
@@ -76,12 +102,22 @@ show_status() {
                                       grep -E '^[a-f0-9]{40}-[0-9]{13}$' | wc -l)
     echo -e "${BLUE}Active conversions:${NC} $active_containers"
     
-    # Show working hours status (Yekaterinburg time)
-    local hour=$(TZ='Asia/Yekaterinburg' date +%H)
-    if [ $hour -ge 22 ] || [ $hour -lt 7 ]; then
-        echo -e "${GREEN}Status: Night processing hours (22:00-07:00 Yekaterinburg)${NC}"
+    # Show working hours status (configurable timezone and hours)
+    local hour=$(TZ="$TIMEZONE" date +%H)
+    local working_hours_text="${WORK_START_HOUR}:00-$(printf "%02d" $WORK_END_HOUR):00 $TIMEZONE"
+    
+    # Check if in working hours (handle overnight shifts)
+    local in_working_hours=false
+    if [ $WORK_START_HOUR -gt $WORK_END_HOUR ]; then
+        [ $hour -ge $WORK_START_HOUR ] || [ $hour -lt $WORK_END_HOUR ] && in_working_hours=true
     else
-        echo -e "${YELLOW}Status: Day time - processing paused${NC}"
+        [ $hour -ge $WORK_START_HOUR ] && [ $hour -lt $WORK_END_HOUR ] && in_working_hours=true
+    fi
+    
+    if [ "$in_working_hours" = true ]; then
+        echo -e "${GREEN}Status: Processing hours ($working_hours_text)${NC}"
+    else
+        echo -e "${YELLOW}Status: Outside processing hours - system paused${NC}"
     fi
 }
 

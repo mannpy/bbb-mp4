@@ -1,9 +1,28 @@
 #!/bin/bash
 # Stop night processor and active BBB-MP4 conversions
 
-LOG_FILE="/var/www/bbb-mp4/logs/night-processor.log"
-PROCESSING_QUEUE="/var/www/bbb-mp4/queue/processing.txt"
-FAILED_LOG="/var/www/bbb-mp4/queue/failed.txt"
+# Load configuration (same as night-processor.sh)
+load_config() {
+    local config_file="${BBB_MP4_DIR:-/var/www/bbb-mp4}/config.env"
+    
+    # Load from config file if exists
+    if [ -f "$config_file" ]; then
+        source "$config_file"
+    fi
+    
+    # Set defaults if not configured
+    export BBB_MP4_DIR="${BBB_MP4_DIR:-/var/www/bbb-mp4}"
+    export QUEUE_DIR="${QUEUE_DIR:-$BBB_MP4_DIR/queue}"
+    export LOG_DIR="${LOG_DIR:-$BBB_MP4_DIR/logs}"
+}
+
+# Load configuration
+load_config
+
+# Configuration variables
+LOG_FILE="$LOG_DIR/night-processor.log"
+PROCESSING_QUEUE="$QUEUE_DIR/processing.txt"
+FAILED_LOG="$QUEUE_DIR/failed.txt"
 
 # Logging function
 log_message() {
