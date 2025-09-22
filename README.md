@@ -86,6 +86,12 @@ CONVERSION_TIMEOUT=7200
 
 # Clear completed entries
 ./queue-manager.sh clear completed
+
+# System management
+./queue-manager.sh reset              # Reset queues and logs
+./queue-manager.sh reset --full       # Reset everything + delete MP4s
+./queue-manager.sh backup-mp4 /backup # Backup MP4 files
+./queue-manager.sh cleanup-mp4        # Interactive MP4 cleanup
 ```
 
 ## 🎛️ Manual Control
@@ -155,6 +161,42 @@ Use cron to run only on weekends, or modify working hours as needed.
     └── systemd.log
 ```
 
+## 🛠️ System Management
+
+### Reset System
+```bash
+# Reset queues and logs (keeps MP4 files)
+./queue-manager.sh reset
+
+# Full reset including MP4 deletion (DANGEROUS!)
+./queue-manager.sh reset --full
+```
+
+### Backup & Cleanup MP4 Files
+```bash
+# Backup MP4 files to external storage
+./queue-manager.sh backup-mp4 /mnt/backup/bbb-recordings
+
+# Interactive cleanup with options
+./queue-manager.sh cleanup-mp4
+# Options: Delete, Backup+Delete, List files, Cancel
+```
+
+### Migration Workflow
+```bash
+# 1. Backup existing MP4s
+./queue-manager.sh backup-mp4 /backup/old-recordings
+
+# 2. Reset system (keeps MP4s)  
+./queue-manager.sh reset
+
+# 3. Clean up MP4s if needed
+./queue-manager.sh cleanup-mp4
+
+# 4. Scan for new recordings
+./queue-manager.sh scan
+```
+
 ## 🔧 Advanced Usage
 
 ### Custom Timezone Setup
@@ -211,6 +253,18 @@ sudo -u bigbluebutton crontab -l
 
 # Retry all failed
 ./queue-manager.sh retry-all
+```
+
+### System Issues
+```bash
+# Reset everything and start fresh
+./queue-manager.sh reset
+
+# Full reset including MP4 deletion (CAREFUL!)
+./queue-manager.sh reset --full
+
+# Clean up old MP4 files
+./queue-manager.sh cleanup-mp4
 ```
 
 ### Docker Issues

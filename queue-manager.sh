@@ -56,6 +56,12 @@ usage() {
     echo "  scan                   - Scan for new recordings and add to queue"
     echo "  active                 - Show active conversion containers"
     echo ""
+    echo "System Management:"
+    echo "  reset                  - Reset all queues and logs (keeps MP4 files)"
+    echo "  reset --full           - Full reset including MP4 files deletion"
+    echo "  cleanup-mp4            - Remove MP4 files (with backup option)"
+    echo "  backup-mp4 <path>      - Backup MP4 files to specified directory"
+    echo ""
     echo "Examples:"
     echo "  $0 status"
     echo "  $0 add abc123...def456-1234567890123"
@@ -384,9 +390,207 @@ main() {
         active)
             show_active
             ;;
+        reset)
+            if [ "$2" = "--full" ]; then
+                reset_system_full
+            else
+                reset_system
+            fi
+            ;;
+        cleanup-mp4)
+            cleanup_mp4_files
+            ;;
+        backup-mp4)
+            if [ -z "$2" ]; then
+                echo -e "${RED}Error: Backup path required${NC}"
+                echo "Usage: $0 backup-mp4 <backup_directory>"
+                exit 1
+            fi
+            backup_mp4_files "$2"
+            ;;
         *)
             usage
             exit 1
+            ;;
+    esac
+}
+
+# Reset system queues and logs (keep MP4 files)
+reset_system() {
+    echo -e "${YELLOW}Resetting BBB MP4 Queue System...${NC}"
+    
+    # Confirm action
+    read -p "This will clear all queues and logs. Continue? (y/N): " confirm
+    if [[ ! $confirm =~ ^[Yy]$ ]]; then
+        echo "Reset cancelled."
+        return 1
+    fi
+    
+    # Stop night processor if running
+    if pgrep -f "night-processor.sh" > /dev/null; then
+        echo -e "${YELLOW}Stopping night processor...${NC}"
+        pkill -f "night-processor.sh" || true
+        sleep 2
+    fi
+    
+    # Stop any active conversions
+    local active_containers=$(docker ps --filter "ancestor=manishkatyan/bbb-mp4" --format "{{.Names}}" | grep -E '^[a-f0-9]{40}-[0-9]{13}$' || true)
+    if [ -n "$active_containers" ]; then
+        echo -e "${YELLOW}Stopping active conversions...${NC}"
+        echo "$active_containers" | while read -r container; do
+            echo "Stopping $container"
+            docker stop "$container" || true
+        done
+    fi
+    
+    # Clear queue files
+    echo -e "${BLUE}Clearing queue files...${NC}"
+    > "$PENDING_QUEUE"
+    > "$PROCESSING_QUEUE"
+    > "$COMPLETED_LOG"
+    > "$FAILED_LOG"
+    
+    # Clear logs
+    echo -e "${BLUE}Clearing log files...${NC}"
+    find "$LOG_DIR" -name "*.log" -type f -exec sh -c '> "$1"' _ {} \;
+    
+    echo -e "${GREEN}✓ System reset complete${NC}"
+    echo -e "${BLUE}MP4 files preserved in: $MP4_OUTPUT_DIR${NC}"
+}
+
+# Full reset including MP4 files deletion
+reset_system_full() {
+    echo -e "${RED}FULL SYSTEM RESET - THIS WILL DELETE ALL MP4 FILES!${NC}"
+    
+    # Double confirm
+    read -p "This will DELETE ALL MP4 files and reset everything. Type 'DELETE' to confirm: " confirm
+    if [ "$confirm" != "DELETE" ]; then
+        echo "Full reset cancelled."
+        return 1
+    fi
+    
+    # First do regular reset
+    reset_system
+    
+    # Delete MP4 files
+    echo -e "${RED}Deleting MP4 files...${NC}"
+    if [ -d "$MP4_OUTPUT_DIR" ]; then
+        local mp4_count=$(find "$MP4_OUTPUT_DIR" -name "*.mp4" -type f | wc -l)
+        if [ $mp4_count -gt 0 ]; then
+            echo "Found $mp4_count MP4 files to delete"
+            find "$MP4_OUTPUT_DIR" -name "*.mp4" -type f -delete
+            echo -e "${GREEN}✓ Deleted $mp4_count MP4 files${NC}"
+        else
+            echo "No MP4 files found"
+        fi
+    fi
+    
+    echo -e "${GREEN}✓ Full system reset complete${NC}"
+}
+
+# Backup MP4 files to specified directory
+backup_mp4_files() {
+    local backup_dir="$1"
+    
+    echo -e "${BLUE}Backing up MP4 files...${NC}"
+    
+    # Create backup directory
+    if ! mkdir -p "$backup_dir"; then
+        echo -e "${RED}Error: Cannot create backup directory: $backup_dir${NC}"
+        return 1
+    fi
+    
+    # Check if MP4 files exist
+    local mp4_count=$(find "$MP4_OUTPUT_DIR" -name "*.mp4" -type f 2>/dev/null | wc -l)
+    if [ $mp4_count -eq 0 ]; then
+        echo -e "${YELLOW}No MP4 files found to backup${NC}"
+        return 0
+    fi
+    
+    # Create timestamped backup subdirectory
+    local timestamp=$(date '+%Y%m%d_%H%M%S')
+    local backup_subdir="$backup_dir/bbb_mp4_backup_$timestamp"
+    mkdir -p "$backup_subdir"
+    
+    echo "Backing up $mp4_count MP4 files to: $backup_subdir"
+    
+    # Copy files with progress
+    local copied=0
+    find "$MP4_OUTPUT_DIR" -name "*.mp4" -type f | while read -r file; do
+        local filename=$(basename "$file")
+        if cp "$file" "$backup_subdir/"; then
+            copied=$((copied + 1))
+            echo "✓ $filename"
+        else
+            echo -e "${RED}✗ Failed to copy $filename${NC}"
+        fi
+    done
+    
+    # Create manifest file
+    echo "# BBB MP4 Backup Manifest" > "$backup_subdir/manifest.txt"
+    echo "# Created: $(date)" >> "$backup_subdir/manifest.txt"
+    echo "# Source: $MP4_OUTPUT_DIR" >> "$backup_subdir/manifest.txt"
+    echo "# Files:" >> "$backup_subdir/manifest.txt"
+    find "$backup_subdir" -name "*.mp4" -type f -exec basename {} \; | sort >> "$backup_subdir/manifest.txt"
+    
+    echo -e "${GREEN}✓ Backup complete: $backup_subdir${NC}"
+    echo -e "${BLUE}Files backed up: $(find "$backup_subdir" -name "*.mp4" | wc -l)${NC}"
+}
+
+# Clean up MP4 files with options
+cleanup_mp4_files() {
+    echo -e "${YELLOW}MP4 Files Cleanup${NC}"
+    
+    # Check if MP4 files exist
+    local mp4_count=$(find "$MP4_OUTPUT_DIR" -name "*.mp4" -type f 2>/dev/null | wc -l)
+    if [ $mp4_count -eq 0 ]; then
+        echo -e "${BLUE}No MP4 files found to clean up${NC}"
+        return 0
+    fi
+    
+    echo "Found $mp4_count MP4 files in: $MP4_OUTPUT_DIR"
+    echo ""
+    echo "Options:"
+    echo "1) Delete all MP4 files immediately"
+    echo "2) Backup first, then delete"
+    echo "3) Show file list only"
+    echo "4) Cancel"
+    
+    read -p "Choose option (1-4): " choice
+    
+    case $choice in
+        1)
+            read -p "Delete $mp4_count MP4 files? Type 'DELETE' to confirm: " confirm
+            if [ "$confirm" = "DELETE" ]; then
+                find "$MP4_OUTPUT_DIR" -name "*.mp4" -type f -delete
+                echo -e "${GREEN}✓ Deleted $mp4_count MP4 files${NC}"
+            else
+                echo "Deletion cancelled"
+            fi
+            ;;
+        2)
+            read -p "Enter backup directory path: " backup_path
+            if [ -n "$backup_path" ]; then
+                if backup_mp4_files "$backup_path"; then
+                    read -p "Backup complete. Delete original files? (y/N): " delete_confirm
+                    if [[ $delete_confirm =~ ^[Yy]$ ]]; then
+                        find "$MP4_OUTPUT_DIR" -name "*.mp4" -type f -delete
+                        echo -e "${GREEN}✓ Original files deleted after backup${NC}"
+                    fi
+                fi
+            else
+                echo "Backup cancelled - no path provided"
+            fi
+            ;;
+        3)
+            echo -e "${BLUE}MP4 Files:${NC}"
+            find "$MP4_OUTPUT_DIR" -name "*.mp4" -type f -exec ls -lh {} \; | awk '{print $9 " (" $5 ")"}'
+            ;;
+        4)
+            echo "Cleanup cancelled"
+            ;;
+        *)
+            echo "Invalid option"
             ;;
     esac
 }
