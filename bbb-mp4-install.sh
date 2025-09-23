@@ -97,7 +97,7 @@ install_post_publish() {
     fi
     
     # Install new queue-based post-publish script
-    cp bbb_mp4_queue.rb /usr/local/bigbluebutton/core/scripts/post_publish/bbb_mp4.rb
+    cp bbb_mp4.rb /usr/local/bigbluebutton/core/scripts/post_publish/bbb_mp4.rb
     chmod +x /usr/local/bigbluebutton/core/scripts/post_publish/bbb_mp4.rb
     
     log_success "Installed queue-based post-publish script"
