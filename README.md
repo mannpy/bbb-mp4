@@ -27,7 +27,7 @@ Automatically convert BigBlueButton recordings to MP4 videos with intelligent ni
 ```bash
 # Clone to your BigBlueButton server
 cd /var/www
-git clone https://github.com/YOUR_USERNAME/bbb-mp4.git
+git clone https://github.com/mannpy/bbb-mp4.git
 cd bbb-mp4
 
 # Configure (optional - auto-detects BBB domain, has sensible defaults)
